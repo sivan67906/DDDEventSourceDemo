@@ -7,19 +7,33 @@ public abstract class BaseEntity<TId>
 #region BaseEntity
 public sealed class BankAccount : BaseEntity<Guid>
 {
-    public string? Name { get; private set; }
-    public int AccountNumber { get; private set; }
-    public DateOnly DateOfBirth { get; private set; }
-    public string? IFSCCode { get; private set; }
-    public int Balance { get; private set; }
-    public bool IsActive { get; private set; }
+    public string? Name { get; set; }
+    public int AccountNumber { get; set; }
+    public DateOnly DateOfBirth { get; set; }
+    public string? IFSC { get; set; }
+    public int Balance { get; set; }
+    public bool IsActive { get; set; }
 }
 #endregion
 
 #region BaseCommand
-public sealed class BaseBankAccountCommand : BaseEntity<Guid>
+public abstract class BaseBankAccountCommand : BaseEntity<Guid>
 {
 
+}
+public sealed class CreateBankAccountCommand : BaseBankAccountCommand
+{
+    public string? Name { get; set; }
+    public int AccountNumber { get; set; }
+    public DateOnly DateOfBirth { get; set; }
+    public string? IFSC { get; set; }
+    public int Balance { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public sealed class DeactivateBankAccountCommand : BaseBankAccountCommand
+{
+    public bool IsActive { get; set; }
 }
 
 #endregion
@@ -34,11 +48,11 @@ public abstract class BaseEvent
 }
 public sealed class CreatedBankAccountEvent : BaseEvent
 {
-    public string? Name { get; private set; }
-    public int AccountNumber { get; private set; }
-    public DateOnly DateOfBirth { get; private set; }
-    public string? IFSCCode { get; private set; }
-    public int Balance { get; private set; }
+    public string? Name { get; set; }
+    public int AccountNumber { get; set; }
+    public DateOnly DateOfBirth { get; set; }
+    public string? IFSC { get; set; }
+    public int Balance { get; set; }
 }
 public sealed class DeletedBankAccountEvent : BaseEvent
 {
@@ -46,19 +60,19 @@ public sealed class DeletedBankAccountEvent : BaseEvent
 }
 public sealed class WithdrawledBankAccountEvent : BaseEvent
 {
-    public int Balance { get; private set; }
+    public int Balance { get; set; }
 }
 public sealed class DepositedBankAccountEvent : BaseEvent
 {
-    public int Balance { get; private set; }
+    public int Balance { get; set; }
 }
 public sealed class ActivatedBankAccountEvent : BaseEvent
 {
-    public bool IsActive { get; private set; }
+    public bool IsActive { get; set; }
 }
 public sealed class DeactivatedBankAccountEvent : BaseEvent
 {
-    public bool IsActive { get; private set; }
+    public bool IsActive { get; set; }
 }
 #endregion
 
@@ -66,12 +80,12 @@ public sealed class DeactivatedBankAccountEvent : BaseEvent
 public class BankAccountAggregate
 {
     public Guid Id { get; set; }
-    public string Name { get; private set; }
-    public int AccountNumber { get; private set; }
-    public DateOnly DateOfBirth { get; private set; }
-    public string IFSCCode { get; private set; }
-    public int Balance { get; private set; }
-    public bool IsActive { get; private set; }
+    public string Name { get; set; }
+    public int AccountNumber { get; set; }
+    public DateOnly DateOfBirth { get; set; }
+    public string IFSC { get; set; }
+    public int Balance { get; set; }
+    public bool IsActive { get; set; }
 
     public BankAccountAggregate()
     {
@@ -84,7 +98,7 @@ public class BankAccountAggregate
         Name = e.Name;
         AccountNumber = e.AccountNumber;
         DateOfBirth = e.DateOfBirth;
-        IFSCCode = e.IFSCCode;
+        IFSC = e.IFSC;
         Balance = e.Balance;
     }
     //public void Apply(DeletedBankAccountEvent e)
@@ -184,7 +198,7 @@ public class BankAccountViewModel
     public required string Name { get; set; }
     public int AccountNumber { get; set; }
     public DateOnly DateOfBirth { get; set; }
-    public required string IFSCCode { get; set; }
+    public required string IFSC { get; set; }
     public decimal Balance { get; set; }
     public bool IsActive { get; set; }
 }
@@ -242,8 +256,50 @@ public class BankAccountRetrieveImplementation : IBankAccountRetrieval
 
         _inMemory[bankAccountViewModel.Id] = bankAccountViewModel;
     }
+}
+#endregion
 
+#region CommandHandler
+public class BankAccountCommandHandler
+{
+    private readonly IEventStore _eventStore;
+    private readonly Dictionary<Guid, BankAccountViewModel> _inMemory = [];
 
+    public BankAccountCommandHandler(IEventStore eventStore)
+    {
+        _eventStore = eventStore;
+    }
 
+    public void Handle(CreateBankAccountCommand command)
+    {
+        // Load Events from event Store
+        IEnumerable<BaseEvent> events = _eventStore.LoadEvent(command.Id);
+
+        // Initiate Aggregate
+        BankAccountAggregate aggregate = new BankAccountAggregate();
+
+        // Generate History based on Events
+        aggregate.LoadHistory(events);
+
+        // Write Database Mapping
+        CreatedBankAccountEvent createdBankAccountEvent = new CreatedBankAccountEvent
+        {
+            Id = command.Id,
+            Name = command.Name,
+            AccountNumber = command.AccountNumber,
+            Balance = command.Balance,
+            DateOfBirth = command.DateOfBirth,
+            IFSC = command.IFSC,
+            TimeStamp = DateTime.UtcNow
+        };
+
+        aggregate.Apply(createdBankAccountEvent);
+
+        // Save Event - Write Database
+        _eventStore.SaveEvent(aggregate.Id, new[] { createdBankAccountEvent });
+
+        // Remove from - Read Database
+        _inMemory.Remove(command.Id);
+    }
 }
 #endregion
